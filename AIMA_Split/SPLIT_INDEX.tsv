@@ -1,0 +1,31 @@
+pdf_start	pdf_end	book_start	title
+20	52	1	1 Introduction
+53	82	34	2 Intelligent Agents
+83	138	64	3 Solving Problems by Searching
+139	179	120	4 Beyond Classical Search
+180	220	161	5 Adversarial Search
+221	252	202	6 Constraint Satisfaction Problems
+253	303	234	7 Logical Agents
+304	340	285	8 First-Order Logic
+341	384	322	9 Inference in First-Order Logic
+385	419	366	10 Classical Planning
+420	455	401	11 Planning and Acting in the Real World
+456	498	437	12 Knowledge Representation
+499	528	480	13 Quantifying Uncertainty
+529	584	510	14 Probabilistic Reasoning
+585	628	566	15 Probabilistic Reasoning over Time
+629	663	610	16 Making Simple Decisions
+664	711	645	17 Making Complex Decisions
+712	786	693	18 Learning from Examples
+787	820	768	19 Knowledge in Learning
+821	848	802	20 Learning Probabilistic Models
+849	878	830	21 Reinforcement Learning
+879	906	860	22 Natural Language Processing
+907	946	888	23 Natural Language for Communication
+947	989	928	24 Perception
+990	1038	971	25 Robotics
+1039	1062	1020	26 Philosophical Foundations
+1063	1071	1044	27 AI: The Present and Future
+1072	1078	1053	Appendix A - Mathematical background
+1079	1081	1060	Appendix B - Notes on Languages and Algorithms
+1082	1151	1063	Bibliography
