@@ -9,7 +9,7 @@ import os
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app, origins=['https://splitpdf-blor.onrender.com', 'http://localhost:3000', 'https://your-frontend.vercel.app'])
+CORS(app, origins='*', methods=['GET', 'POST', 'OPTIONS'], allow_headers=['Content-Type'])
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR = BASE_DIR / "outputs"
