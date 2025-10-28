@@ -1,0 +1,19 @@
+# môi trường và cache
+.venv/
+__pycache__/
+
+# dữ liệu nặng / tạm
+uploads/
+outputs/
+*.pdf
+*.zip
+*.npy
+*.parquet
+*.pkl
+*.joblib
+*.log
+
+# dev files
+*.ipynb
+tests/
+docs/
