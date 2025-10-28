@@ -99,6 +99,26 @@
       flex-shrink: 0;
     }
     
+    .alert-error {
+      background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+      border: 2px solid var(--error);
+      color: #7f1d1d;
+    }
+    
+    .alert-error::before {
+      content: '!';
+      width: 24px;
+      height: 24px;
+      background: var(--error);
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      flex-shrink: 0;
+    }
+    
     .alert-close {
       margin-left: auto;
       background: none;
@@ -514,87 +534,7 @@
       color: var(--accent);
     }
   </style>
-  <!-- index.html: thêm trong <head> hoặc trước </body> -->
-<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-<script>
-  const SUPABASE_URL = "https://qgeviaepyuhroqgevzag.supabase.co";        // thay bằng của bạn
-  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFnZXZpYWVweXVocm9xZ2V2emFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE2NzkyOTgsImV4cCI6MjA3NzI1NTI5OH0.ZDOMu8YIrVlz836v-EBRF74GqTifCUTszTtfQ545ocw";    // thay bằng của bạn
-  const BUCKET = "uploads";
-
-  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-  async function uploadToSupabase(file) {
-    const ext = file.name.split('.').pop() || 'pdf';
-    const key = `pdf/${crypto.randomUUID()}.${ext}`;   // đường dẫn trong bucket
-    const { data, error } = await supabase.storage.from(BUCKET).upload(key, file, {
-      cacheControl: '3600',
-      upsert: false
-    });
-    if (error) throw error;
-
-    const { data: pub, error: pubErr } = supabase
-      .storage.from(BUCKET)
-      .getPublicUrl(key);
-    if (pubErr) throw pubErr;
-
-    return pub.publicUrl;  // URL công khai
-  }
-
-  async function splitViaApi(publicUrl, tocText, tocType = 'json', pageOffset = 0, outdir = 'AIMA_Split') {
-    const res = await fetch('/api/split', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        source: 'supabase',
-        url: publicUrl,
-        toc_type: tocType,
-        toc: tocText,
-        page_offset: pageOffset,
-        outdir: outdir
-      })
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || res.statusText);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${outdir}.zip`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  // ví dụ handler cho form
-  async function handleSplit() {
-    try {
-      const pdfFile = document.querySelector('#pdf').files[0];
-      const tocFile = document.querySelector('#toc').files[0];
-      const tocType = document.querySelector('#tocType').value; // 'json'|'tsv'
-      const pageOffset = parseInt(document.querySelector('#pageOffset').value || '0', 10);
-      const outdir = document.querySelector('#outdir').value || 'AIMA_Split';
-
-      if (!pdfFile || !tocFile) {
-        alert('Missing PDF or TOC file');
-        return;
-      }
-
-      // đọc nội dung TOC
-      const tocText = await tocFile.text();
-
-      // upload PDF lên supabase trước
-      const publicUrl = await uploadToSupabase(pdfFile);
-
-      // gọi API tách
-      await splitViaApi(publicUrl, tocText, tocType, pageOffset, outdir);
-    } catch (err) {
-      console.error(err);
-      alert('Error: ' + err.message);
-    }
-  }
-</script>
-
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <div class="container">
@@ -616,7 +556,7 @@
         <div class="form-section">
           <label for="pdf">File PDF</label>
           <input id="pdf" type="file" accept="application/pdf" required />
-          <div class="help-text">Chọn file PDF cần tách. Hỗ trợ file lớn.</div>
+          <div class="help-text">Chọn file PDF cần tách. File sẽ được upload lên Supabase Storage.</div>
         </div>
 
         <div class="form-section">
@@ -761,6 +701,15 @@
   </div>
 
   <script>
+    // Supabase Configuration
+    const SUPABASE_URL = "https://qgeviaepyuhroqgevzag.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFnZXZpYWVweXVocm9xZ2V2emFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE2NzkyOTgsImV4cCI6MjA3NzI1NTI5OH0.ZDOMu8YIrVlz836v-EBRF74GqTifCUTszTtfQ545ocw";
+    const BUCKET = "uploads";
+
+    // Initialize Supabase client
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // DOM Elements
     const form = document.getElementById('splitForm');
     const logContent = document.getElementById('logContent');
     const btnClear = document.getElementById('btnClear');
@@ -772,7 +721,177 @@
     const downloadBtn = document.getElementById('downloadBtn');
     const downloadText = document.getElementById('downloadText');
     const tocAlert = document.getElementById('tocAlert');
-    const tocInput = document.getElementById('toc');
+
+    // Utility Functions
+    function log(message, type = '') {
+      const div = document.createElement('div');
+      div.className = 'log-item';
+      if (type === 'success') div.classList.add('log-success');
+      if (type === 'error') div.classList.add('log-error');
+      div.textContent = message;
+      logContent.appendChild(div);
+      logContent.scrollTop = logContent.scrollHeight;
+    }
+
+    function showAlert(message, type = 'success') {
+      tocAlert.innerHTML = `
+        <div class="alert alert-${type}">
+          <span>${message}</span>
+          <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+        </div>
+      `;
+      tocAlert.style.display = 'block';
+    }
+
+    function updateProgress(current, total, message) {
+      const percent = Math.round((current / total) * 100);
+      progressFill.style.width = percent + '%';
+      progressFill.textContent = percent + '%';
+      progressStatus.textContent = `${current}/${total}: ${message}`;
+    }
+
+    // Supabase Upload Function
+    async function uploadToSupabase(file, fileType = 'pdf') {
+      const ext = file.name.split('.').pop() || fileType;
+      const timestamp = Date.now();
+      const key = `${fileType}/${timestamp}_${file.name}`;
+      
+      log(`Đang upload ${fileType} file lên Supabase...`);
+      
+      const { data, error } = await supabase.storage
+        .from(BUCKET)
+        .upload(key, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      if (error) {
+        throw new Error(`Upload ${fileType} thất bại: ${error.message}`);
+      }
+
+      // Get public URL
+      const { data: publicUrlData } = supabase.storage
+        .from(BUCKET)
+        .getPublicUrl(key);
+
+      log(`✓ Upload ${fileType} thành công: ${file.name}`);
+      return publicUrlData.publicUrl;
+    }
+
+    // API Call Function
+    async function callSplitApi(pdfUrl, tocContent, tocType, pageOffset, outdir) {
+      log('Đang gọi API để xử lý PDF...');
+
+      const response = await fetch('/api/split', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          source: 'supabase',
+          url: pdfUrl,
+          toc_type: tocType,
+          toc: tocContent,
+          page_offset: parseInt(pageOffset),
+          outdir: outdir
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      return await response.blob();
+    }
+
+    // Read TOC File
+    async function readTocFile(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = (e) => reject(new Error('Không thể đọc file TOC'));
+        reader.readAsText(file);
+      });
+    }
+
+    // Main Form Handler
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      // Reset UI
+      logContent.textContent = '';
+      progressCard.classList.add('active');
+      downloadCard.classList.remove('active');
+      btnSubmit.disabled = true;
+      progressFill.style.width = '0%';
+      progressFill.textContent = '0%';
+      progressStatus.textContent = 'Đang khởi tạo...';
+
+      // Get form data
+      const pdfFile = document.getElementById('pdf').files[0];
+      const tocFile = document.getElementById('toc').files[0];
+      const tocType = document.querySelector('input[name="toc_type"]:checked').value;
+      const pageOffset = document.getElementById('page_offset').value || '0';
+      const outdir = document.getElementById('outdir').value || 'AIMA_Split';
+
+      if (!pdfFile || !tocFile) {
+        showAlert('Vui lòng chọn cả file PDF và TOC', 'error');
+        btnSubmit.disabled = false;
+        progressCard.classList.remove('active');
+        return;
+      }
+
+      try {
+        // Step 1: Upload PDF to Supabase
+        updateProgress(1, 5, 'Đang upload PDF...');
+        const pdfUrl = await uploadToSupabase(pdfFile, 'pdf');
+
+        // Step 2: Read TOC content
+        updateProgress(2, 5, 'Đang đọc file TOC...');
+        const tocContent = await readTocFile(tocFile);
+
+        // Step 3: Upload TOC to Supabase (optional, for backup)
+        updateProgress(3, 5, 'Đang upload TOC...');
+        const tocBlob = new Blob([tocContent], { type: 'text/plain' });
+        const tocFileObj = new File([tocBlob], 'toc.txt', { type: 'text/plain' });
+        await uploadToSupabase(tocFileObj, 'toc');
+
+        // Step 4: Call API to process PDF
+        updateProgress(4, 5, 'Đang xử lý PDF...');
+        const zipBlob = await callSplitApi(pdfUrl, tocContent, tocType, pageOffset, outdir);
+
+        // Step 5: Create download link
+        updateProgress(5, 5, 'Đang tạo file download...');
+        const zipUrl = URL.createObjectURL(zipBlob);
+        
+        downloadCard.classList.add('active');
+        downloadBtn.href = zipUrl;
+        downloadBtn.download = `${outdir}.zip`;
+        downloadText.textContent = `Đã tách thành công - ${pdfFile.name}`;
+        
+        log('✓ Xử lý hoàn thành!', 'success');
+        showAlert('PDF đã được tách thành công!');
+
+      } catch (error) {
+        log(`✗ Lỗi: ${error.message}`, 'error');
+        showAlert(`Lỗi: ${error.message}`, 'error');
+        progressCard.classList.remove('active');
+      } finally {
+        btnSubmit.disabled = false;
+        progressFill.style.width = '100%';
+        progressFill.textContent = '100%';
+        progressStatus.textContent = 'Hoàn thành';
+      }
+    });
+
+    // Clear Logs
+    btnClear.addEventListener('click', () => {
+      logContent.textContent = '';
+      progressCard.classList.remove('active');
+      downloadCard.classList.remove('active');
+      tocAlert.style.display = 'none';
+    });
 
     // Check for TOC data from Generator on page load
     window.addEventListener('DOMContentLoaded', () => {
@@ -794,16 +913,10 @@
             // Create a DataTransfer to set the file input
             const dataTransfer = new DataTransfer();
             dataTransfer.items.add(file);
-            tocInput.files = dataTransfer.files;
+            document.getElementById('toc').files = dataTransfer.files;
             
             // Show success alert
-            tocAlert.innerHTML = `
-              <div class="alert alert-success">
-                <span>Đã nhận TOC từ Generator! (${data.length} chapters)</span>
-                <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
-              </div>
-            `;
-            tocAlert.style.display = 'block';
+            showAlert(`Đã nhận TOC từ Generator! (${data.length} chapters)`);
             
             // Clear localStorage
             localStorage.removeItem('tocFromGenerator');
@@ -823,145 +936,6 @@
         }
       }
     });
-
-    function log(message, type = '') {
-      const div = document.createElement('div');
-      div.className = 'log-item';
-      if (type === 'success') div.classList.add('log-success');
-      if (type === 'error') div.classList.add('log-error');
-      div.textContent = message;
-      logContent.appendChild(div);
-      logContent.scrollTop = logContent.scrollHeight;
-    }
-
-    function updateProgress(current, total, message) {
-      const percent = Math.round((current / total) * 100);
-      progressFill.style.width = percent + '%';
-      progressFill.textContent = percent + '%';
-      progressStatus.textContent = `${current}/${total}: ${message}`;
-    }
-
-    btnClear.addEventListener('click', () => {
-      logContent.textContent = '';
-      progressCard.classList.remove('active');
-      downloadCard.classList.remove('active');
-    });
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      logContent.textContent = '';
-      progressCard.classList.add('active');
-      downloadCard.classList.remove('active');
-      btnSubmit.disabled = true;
-      progressFill.style.width = '0%';
-      progressFill.textContent = '0%';
-      progressStatus.textContent = 'Đang khởi tạo...';
-
-      const pdf = document.getElementById('pdf').files[0];
-      const toc = document.getElementById('toc').files[0];
-      const tocType = new FormData(form).get('toc_type');
-      const pageOffset = document.getElementById('page_offset').value || '0';
-      const outdir = document.getElementById('outdir').value || 'AIMA_Split';
-
-      if (!pdf || !toc) {
-        log('Vui lòng chọn cả file PDF và TOC', 'error');
-        btnSubmit.disabled = false;
-        progressCard.classList.remove('active');
-        return;
-      }
-
-      const fd = new FormData();
-      fd.append('pdf', pdf);
-      fd.append('toc', toc);
-      fd.append('toc_type', tocType);
-      fd.append('page_offset', pageOffset);
-      fd.append('outdir', outdir);
-
-      try {
-        log('Đang tải file lên server...');
-        const res = await fetch('/api/split', { method: 'POST', body: fd });
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder('utf-8');
-        
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-          
-          for (const line of lines) {
-            if (!line.trim() || !line.startsWith('data:')) continue;
-            
-            const data = line.slice(5).trim();
-            try {
-              const evt = JSON.parse(data);
-              handleEvent(evt);
-            } catch {
-              log(data);
-            }
-          }
-        }
-        
-        btnSubmit.disabled = false;
-      } catch (err) {
-        log('Lỗi kết nối: ' + (err && err.message ? err.message : err), 'error');
-        btnSubmit.disabled = false;
-        progressCard.classList.remove('active');
-      }
-    });
-
-    function handleEvent(evt) {
-      if (evt.type === 'log') {
-        log(evt.message);
-      }
-      if (evt.type === 'progress') {
-        updateProgress(evt.current, evt.total, evt.message);
-        log(`[${evt.current}/${evt.total}] ${evt.message}`);
-      }
-      if (evt.type === 'error') {
-        log('Lỗi: ' + evt.message, 'error');
-        if (evt.traceback) log(evt.traceback, 'error');
-        btnSubmit.disabled = false;
-        progressCard.classList.remove('active');
-      }
-      if (evt.type === 'ok') {
-        log(evt.message, 'success');
-      }
-      if (evt.type === 'done') {
-        handleDone(evt.payload || {});
-      }
-    }
-
-    function handleDone(data) {
-      if (data.error) {
-        log('Lỗi server: ' + data.error, 'error');
-        btnSubmit.disabled = false;
-        progressCard.classList.remove('active');
-        return;
-      }
-      
-      progressFill.style.width = '100%';
-      progressFill.textContent = '100%';
-      progressStatus.textContent = 'Hoàn thành!';
-      
-      if (data.zip_url) {
-        downloadCard.classList.add('active');
-        downloadBtn.href = data.zip_url;
-        downloadText.textContent = `Đã tách thành công ${data.total || 0} chapter`;
-        log(`File ZIP đã sẵn sàng để tải về`, 'success');
-      }
-      
-      if (Array.isArray(data.parts)) {
-        log(`\nĐã tạo ${data.parts.length} file:`, 'success');
-        for (const p of data.parts) {
-          log(`  • ${p.name}`);
-        }
-      }
-      
-      btnSubmit.disabled = false;
-    }
   </script>
 </body>
 </html>
