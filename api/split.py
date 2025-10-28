@@ -5,10 +5,6 @@ import zipfile
 import requests
 from pathlib import Path
 from typing import List, Tuple
-from flask import Flask, request, send_file, jsonify
-from splitter import split_pdf
-
-app = Flask(__name__)
 
 def parse_tsv(s: str) -> List[Tuple[str, int]]:
     out = []
@@ -44,70 +40,137 @@ def parse_json_toc(s: str) -> List[Tuple[str, int]]:
     entries.sort(key=lambda x: x[1])
     return entries
 
-@app.after_request
-def add_cors(resp):
-    resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    return resp
+def sanitize_filename(name: str) -> str:
+    import re
+    name = re.sub(r"[^\w\s\-\.]", "", name).strip()
+    name = re.sub(r"\s+", "_", name)
+    return name[:180]
 
-@app.route("/", methods=["POST", "OPTIONS"])
-def split_endpoint():
+def split_pdf_vercel(pdf_buffer, toc: List[Tuple[str,int]], page_offset: int = 0):
+    from pypdf import PdfReader, PdfWriter
+    import re
+    
+    reader = PdfReader(pdf_buffer)
+    total = len(reader.pages)
+    ranges = []
+    
+    for i, (title, start_book) in enumerate(toc):
+        pdf_start = start_book + page_offset - 1
+        pdf_end = (toc[i+1][1] + page_offset - 2) if i < len(toc)-1 else total-1
+        pdf_end = min(pdf_end, total-1)
+        if pdf_start < 0 or pdf_start >= total or pdf_end < pdf_start:
+            raise ValueError("Invalid TOC or page_offset")
+        ranges.append((title, pdf_start, pdf_end))
+
+    written_files = {}
+    
+    for idx, (title, s, e) in enumerate(ranges, 1):
+        # tên file như trong script của bạn
+        m = re.match(r"^(\d+)\s+(.+)$", title.strip())
+        if m:
+            fname = f"Ch{int(m.group(1)):02d}_{sanitize_filename(m.group(2))}.pdf"
+        else:
+            fname = f"Part_{idx:02d}_{sanitize_filename(title)}.pdf"
+        
+        w = PdfWriter()
+        for p in range(s, e+1):
+            w.add_page(reader.pages[p])
+        
+        # Save to bytes buffer
+        pdf_buffer = io.BytesIO()
+        w.write(pdf_buffer)
+        pdf_buffer.seek(0)
+        
+        written_files[fname] = pdf_buffer.getvalue()
+    
+    return written_files
+
+def handler(request):
+    import json as json_module
+    
     if request.method == "OPTIONS":
-        return ("", 204)
+        return {
+            "statusCode": 204,
+            "headers": {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type"
+            }
+        }
 
     try:
-        payload = request.get_json(silent=True) or {}
-        if not payload:
-            return jsonify({"error": "Expect JSON body"}), 400
+        # Parse JSON body
+        body = request.get_json()
+        
+        if not body:
+            return {
+                "statusCode": 400,
+                "headers": {
+                    "Access-Control-Allow-Origin": "*",
+                    "Content-Type": "application/json"
+                },
+                "body": json_module.dumps({"error": "Expect JSON body"})
+            }
 
-        source = payload.get("source", "supabase")
+        source = body.get("source", "supabase")
         if source != "supabase":
-            return jsonify({"error": "Unsupported source"}), 400
+            return {
+                "statusCode": 400,
+                "headers": {"Access-Control-Allow-Origin": "*", "Content-Type": "application/json"},
+                "body": json_module.dumps({"error": "Unsupported source"})
+            }
 
-        file_url = payload.get("url")
-        toc_type = payload.get("toc_type", "json")
-        toc_text = payload.get("toc", "")
-        page_offset = int(payload.get("page_offset", 0))
-        outdir_name = payload.get("outdir", "AIMA_Split")
+        file_url = body.get("url")
+        toc_type = body.get("toc_type", "json")
+        toc_text = body.get("toc", "")
+        page_offset = int(body.get("page_offset", 0))
+        outdir_name = body.get("outdir", "AIMA_Split")
 
         if not file_url or not toc_text:
-            return jsonify({"error": "Missing url or toc"}), 400
+            return {
+                "statusCode": 400,
+                "headers": {"Access-Control-Allow-Origin": "*", "Content-Type": "application/json"},
+                "body": json_module.dumps({"error": "Missing url or toc"})
+            }
 
-        # tải file vào /tmp
-        tmpdir = Path("/tmp")
-        tmpdir.mkdir(exist_ok=True)
-        pdf_path = tmpdir / "input.pdf"
-
+        # Download PDF from Supabase
         r = requests.get(file_url, timeout=60)
         r.raise_for_status()
-        pdf_path.write_bytes(r.content)
+        pdf_buffer = io.BytesIO(r.content)
 
-        # parse TOC
+        # Parse TOC
         toc = parse_json_toc(toc_text) if toc_type == "json" else parse_tsv(toc_text)
 
-        # chạy split
-        outdir = tmpdir / outdir_name
-        outdir.mkdir(exist_ok=True)
-        written = split_pdf(pdf_path, toc, outdir, page_offset=page_offset)
+        # Split PDF
+        written_files = split_pdf_vercel(pdf_buffer, toc, page_offset=page_offset)
 
-        # nén ZIP vào memory
-        zip_buf = io.BytesIO()
-        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for fname in written:
-                fp = outdir / fname
-                zf.write(fp, arcname=fname)
-        zip_buf.seek(0)
+        # Create ZIP in memory
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for fname, content in written_files.items():
+                zf.writestr(fname, content)
+        zip_buffer.seek(0)
 
-        return send_file(
-            zip_buf,
-            mimetype="application/zip",
-            as_attachment=True,
-            download_name=f"{outdir_name}.zip"
-        )
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "application/zip",
+                "Content-Disposition": f"attachment; filename={outdir_name}.zip"
+            },
+            "body": zip_buffer.getvalue().decode('latin-1')  # For binary data in Vercel
+        }
 
     except Exception as e:
         import traceback
-        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
-
-# Vercel sẽ dùng biến app
+        return {
+            "statusCode": 500,
+            "headers": {
+                "Access-Control-Allow-Origin": "*", 
+                "Content-Type": "application/json"
+            },
+            "body": json_module.dumps({
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            })
+        }
