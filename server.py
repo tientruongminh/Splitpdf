@@ -5,6 +5,7 @@ import json
 import zipfile
 import io
 import time
+import os
 
 app = Flask(__name__)
 BASE_DIR = Path(__file__).parent
@@ -66,7 +67,6 @@ def api_split():
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
         return response
 
-    # ĐỌC DATA TRƯỚC KHI VÀO GENERATOR
     try:
         pdf_file = request.files.get('pdf')
         toc_file = request.files.get('toc')
@@ -77,7 +77,6 @@ def api_split():
         if not pdf_file or not toc_file:
             return jsonify({'error': 'Thiếu file PDF hoặc file TOC'}), 400
 
-        # Lưu files ngay
         pdf_filename = pdf_file.filename
         pdf_path = UPLOAD_DIR / pdf_filename
         pdf_file.save(pdf_path)
@@ -88,8 +87,6 @@ def api_split():
         import traceback
         return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
 
-    # BÂY GIỜ MỚI TẠO GENERATOR với data đã đọc
-    
     def generate():
         try:
             import re
@@ -98,7 +95,6 @@ def api_split():
             yield f'data: {json.dumps({"type": "log", "message": "✅ Đã tải file lên thành công"})}\n\n'
             yield f'data: {json.dumps({"type": "log", "message": "📖 Đang đọc mục lục..."})}\n\n'
             
-            # Parse TOC
             if toc_type == 'json':
                 toc = parse_json_toc(toc_text)
             else:
@@ -106,13 +102,11 @@ def api_split():
 
             yield f'data: {json.dumps({"type": "log", "message": f"📚 Tìm thấy {len(toc)} chương"})}\n\n'
 
-            # Tạo output dir
             outdir = OUTPUT_DIR / outdir_name
             outdir.mkdir(parents=True, exist_ok=True)
             
             yield f'data: {json.dumps({"type": "log", "message": "🔍 Đang đọc file PDF..."})}\n\n'
             
-            # Split PDF với progress
             reader = PdfReader(str(pdf_path))
             total = len(reader.pages)
             yield f'data: {json.dumps({"type": "log", "message": f"📄 PDF có {total} trang"})}\n\n'
@@ -133,7 +127,6 @@ def api_split():
             for idx, (title, s, e) in enumerate(ranges, 1):
                 yield f'data: {json.dumps({"type": "progress", "current": idx, "total": len(ranges), "message": f"Đang xử lý: {title}"})}\n\n'
                 
-                # Tạo tên file
                 m = re.match(r"^(\d+)\s+(.+)$", title.strip())
                 if m:
                     chapter_num = int(m.group(1))
@@ -153,7 +146,6 @@ def api_split():
 
             yield f'data: {json.dumps({"type": "log", "message": "🗜️ Đang nén các file thành ZIP..."})}\n\n'
             
-            # Tạo ZIP
             zip_filename = f"{outdir_name}.zip"
             zip_path = OUTPUT_DIR / zip_filename
             
@@ -167,7 +159,7 @@ def api_split():
 
         except Exception as e:
             import traceback
-            yield f'data: {json.dumps({"type": "error", "message": f"❌ Lỗi: {str(e)}", "traceback": traceback.format_exc()})}\n\n'
+            yield f'data: {json.dumps({"type": "error", "message": f"❌ Có lỗi xảy ra: {str(e)}", "traceback": traceback.format_exc()})}\n\n'
 
     return Response(generate(), mimetype='text/event-stream', headers={
         'Access-Control-Allow-Origin': '*',
@@ -177,7 +169,6 @@ def api_split():
 
 @app.route('/api/split-supabase', methods=['POST', 'OPTIONS'])
 def api_split_supabase():
-    """API mới để xử lý request từ Supabase (JSON body)"""
     if request.method == 'OPTIONS':
         response = jsonify({'ok': True})
         response.headers['Access-Control-Allow-Origin'] = '*'
@@ -186,7 +177,6 @@ def api_split_supabase():
         return response
 
     try:
-        # Nhận JSON data từ Supabase flow
         data = request.get_json()
         
         if not data:
@@ -202,16 +192,13 @@ def api_split_supabase():
         if source != 'supabase' or not pdf_url or not toc_text:
             return jsonify({'error': 'Thiếu thông tin bắt buộc'}), 400
 
-        # Download PDF từ Supabase URL
         import requests
         response = requests.get(pdf_url, timeout=60)
         response.raise_for_status()
         
-        # Lưu PDF tạm
         pdf_path = UPLOAD_DIR / "temp_supabase.pdf"
         pdf_path.write_bytes(response.content)
 
-        # Phần còn lại giống như api_split() nhưng dùng PDF đã download
         def generate():
             try:
                 import re
@@ -220,7 +207,6 @@ def api_split_supabase():
                 yield f'data: {json.dumps({"type": "log", "message": "✅ Đã tải PDF từ Supabase"})}\n\n'
                 yield f'data: {json.dumps({"type": "log", "message": "📖 Đang đọc mục lục..."})}\n\n'
                 
-                # Parse TOC
                 if toc_type == 'json':
                     toc = parse_json_toc(toc_text)
                 else:
@@ -228,13 +214,11 @@ def api_split_supabase():
 
                 yield f'data: {json.dumps({"type": "log", "message": f"📚 Tìm thấy {len(toc)} chương"})}\n\n'
 
-                # Tạo output dir
                 outdir = OUTPUT_DIR / outdir_name
                 outdir.mkdir(parents=True, exist_ok=True)
                 
                 yield f'data: {json.dumps({"type": "log", "message": "🔍 Đang đọc file PDF..."})}\n\n'
                 
-                # Split PDF với progress
                 reader = PdfReader(str(pdf_path))
                 total = len(reader.pages)
                 yield f'data: {json.dumps({"type": "log", "message": f"📄 PDF có {total} trang"})}\n\n'
@@ -255,7 +239,6 @@ def api_split_supabase():
                 for idx, (title, s, e) in enumerate(ranges, 1):
                     yield f'data: {json.dumps({"type": "progress", "current": idx, "total": len(ranges), "message": f"Đang xử lý: {title}"})}\n\n'
                     
-                    # Tạo tên file
                     m = re.match(r"^(\d+)\s+(.+)$", title.strip())
                     if m:
                         chapter_num = int(m.group(1))
@@ -275,7 +258,6 @@ def api_split_supabase():
 
                 yield f'data: {json.dumps({"type": "log", "message": "🗜️ Đang nén các file thành ZIP..."})}\n\n'
                 
-                # Tạo ZIP
                 zip_filename = f"{outdir_name}.zip"
                 zip_path = OUTPUT_DIR / zip_filename
                 
@@ -314,4 +296,10 @@ def toc_generator():
     return send_from_directory('.', 'toc_generator.html')
 
 if __name__ == '__main__':
-    app.run(debug=True, port=3000, threaded=True)
+    # QUAN TRỌNG: Sửa port binding cho Render
+    port = int(os.environ.get('PORT', 3000))
+    app.run(
+        host='0.0.0.0',  # ← THAY ĐỔI QUAN TRỌNG
+        port=port, 
+        debug=False  # ← Tắt debug mode trên production
+    )
