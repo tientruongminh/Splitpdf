@@ -1,15 +1,21 @@
-# api/split.py - SỬA LẠI
+# api/split.py  (Vercel Python Runtime - Flask WSGI)
+import io
 import json
+import zipfile
 from pathlib import Path
 from typing import List, Tuple
-from http.server import BaseHTTPRequestHandler
-from splitter import split_pdf  # ✅ Import từ splitter.py
 
-def parse_tsv(s: str) -> List[Tuple[str,int]]:
+from flask import Flask, request, send_file, jsonify
+
+from splitter import split_pdf  # bạn đã có file splitter.py
+
+app = Flask(__name__)
+
+def parse_tsv(s: str) -> List[Tuple[str, int]]:
     out = []
     for line in s.splitlines():
         line = line.strip()
-        if not line or line.startswith("#"): 
+        if not line or line.startswith("#"):
             continue
         parts = line.split("\t")
         if len(parts) < 2:
@@ -20,7 +26,7 @@ def parse_tsv(s: str) -> List[Tuple[str,int]]:
     out.sort(key=lambda x: x[1])
     return out
 
-def parse_json_toc(s: str) -> List[Tuple[str,int]]:
+def parse_json_toc(s: str) -> List[Tuple[str, int]]:
     data = json.loads(s)
     entries = []
     if isinstance(data, list):
@@ -29,7 +35,7 @@ def parse_json_toc(s: str) -> List[Tuple[str,int]]:
     elif isinstance(data, dict):
         def rec(d):
             for k, v in d.items():
-                if isinstance(v, dict): 
+                if isinstance(v, dict):
                     yield from rec(v)
                 else:
                     yield (str(k), int(v))
@@ -39,76 +45,68 @@ def parse_json_toc(s: str) -> List[Tuple[str,int]]:
     entries.sort(key=lambda x: x[1])
     return entries
 
-class handler(BaseHTTPRequestHandler):
-    def do_OPTIONS(self):
-        self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.end_headers()
+@app.after_request
+def add_cors(resp):
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return resp
 
-    def do_POST(self):
-        try:
-            ctype = self.headers.get("Content-Type", "")
-            if "multipart/form-data" not in ctype:
-                self.send_json(400, {"error":"Content-Type must be multipart/form-data"})
-                return
+@app.route("/", methods=["POST", "OPTIONS"])
+def split_endpoint():
+    if request.method == "OPTIONS":
+        return ("", 204)
 
-            import cgi
-            form = cgi.FieldStorage(
-                fp=self.rfile,
-                headers=self.headers,
-                environ={"REQUEST_METHOD":"POST","CONTENT_TYPE":ctype}
-            )
-            
-            pdf_item = form["pdf"] if "pdf" in form else None
-            toc_item = form["toc"] if "toc" in form else None
-            toc_type = form.getvalue("toc_type", "json")
-            page_offset = int(form.getvalue("page_offset", "0"))
-            outdir_name = form.getvalue("outdir", "AIMA_Split")
+    try:
+        if not request.content_type or "multipart/form-data" not in request.content_type:
+            return jsonify({"error": "Content-Type must be multipart/form-data"}), 400
 
-            if not pdf_item or not toc_item:
-                self.send_json(400, {"error":"Missing PDF or TOC file"})
-                return
+        pdf_file = request.files.get("pdf")
+        toc_file = request.files.get("toc")
+        if not pdf_file or not toc_file:
+            return jsonify({"error": "Missing PDF or TOC file"}), 400
 
-            # Lưu file vào /tmp
-            tmpdir = Path("/tmp")
-            pdf_path = tmpdir / pdf_item.filename
-            with open(pdf_path, "wb") as f:
-                f.write(pdf_item.file.read())
+        toc_type = request.form.get("toc_type", "json")
+        page_offset = int(request.form.get("page_offset", "0"))
+        outdir_name = request.form.get("outdir", "AIMA_Split")
 
-            toc_text = toc_item.file.read().decode("utf-8", errors="ignore")
-            
-            # Parse TOC
-            if toc_type == "json":
-                toc = parse_json_toc(toc_text)
-            else:
-                toc = parse_tsv(toc_text)
+        # lưu vào /tmp (chỉ tồn tại trong 1 request)
+        tmpdir = Path("/tmp")
+        tmpdir.mkdir(exist_ok=True)
+        pdf_path = tmpdir / pdf_file.filename
+        pdf_file.save(pdf_path)
 
-            outdir = tmpdir / outdir_name
-            outdir.mkdir(exist_ok=True)
-            
-            # Gọi splitter
-            written = split_pdf(pdf_path, toc, outdir, page_offset=page_offset)
+        toc_text = toc_file.read().decode("utf-8", errors="ignore")
+        toc = parse_json_toc(toc_text) if toc_type == "json" else parse_tsv(toc_text)
 
-            self.send_json(200, {
-                "ok": True,
-                "parts": [{"name": n} for n in written],
-                "message": f"Successfully split into {len(written)} files"
-            })
-            
-        except Exception as e:
-            import traceback
-            self.send_json(500, {
-                "error": str(e),
-                "traceback": traceback.format_exc()
-            })
+        # outdir tạm
+        outdir = tmpdir / outdir_name
+        outdir.mkdir(exist_ok=True)
 
-    def send_json(self, code, obj):
-        body = json.dumps(obj).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        # gọi hàm xử lý của bạn: nên trả về danh sách tên file đã viết
+        # ví dụ: written = ["Ch01_Intro.pdf", "Ch02_Search.pdf", ...]
+        written = split_pdf(pdf_path, toc, outdir, page_offset=page_offset)
+
+        # nén ZIP vào memory
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for fname in written:
+                file_path = outdir / fname
+                # arcname để trong zip chỉ có tên file, không chứa path đầy đủ
+                zf.write(file_path, arcname=fname)
+        zip_buf.seek(0)
+
+        # trả file zip trực tiếp cho client
+        download_name = f"{outdir_name}.zip"
+        return send_file(
+            zip_buf,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=download_name
+        )
+
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+
+# Vercel sẽ tự phát hiện biến `app` (Flask WSGI)
