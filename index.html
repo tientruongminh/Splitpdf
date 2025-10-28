@@ -514,6 +514,87 @@
       color: var(--accent);
     }
   </style>
+  <!-- index.html: thêm trong <head> hoặc trước </body> -->
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script>
+  const SUPABASE_URL = "https://qgeviaepyuhroqgevzag.supabase.co";        // thay bằng của bạn
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFnZXZpYWVweXVocm9xZ2V2emFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE2NzkyOTgsImV4cCI6MjA3NzI1NTI5OH0.ZDOMu8YIrVlz836v-EBRF74GqTifCUTszTtfQ545ocw";    // thay bằng của bạn
+  const BUCKET = "uploads";
+
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  async function uploadToSupabase(file) {
+    const ext = file.name.split('.').pop() || 'pdf';
+    const key = `pdf/${crypto.randomUUID()}.${ext}`;   // đường dẫn trong bucket
+    const { data, error } = await supabase.storage.from(BUCKET).upload(key, file, {
+      cacheControl: '3600',
+      upsert: false
+    });
+    if (error) throw error;
+
+    const { data: pub, error: pubErr } = supabase
+      .storage.from(BUCKET)
+      .getPublicUrl(key);
+    if (pubErr) throw pubErr;
+
+    return pub.publicUrl;  // URL công khai
+  }
+
+  async function splitViaApi(publicUrl, tocText, tocType = 'json', pageOffset = 0, outdir = 'AIMA_Split') {
+    const res = await fetch('/api/split', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        source: 'supabase',
+        url: publicUrl,
+        toc_type: tocType,
+        toc: tocText,
+        page_offset: pageOffset,
+        outdir: outdir
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || res.statusText);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${outdir}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ví dụ handler cho form
+  async function handleSplit() {
+    try {
+      const pdfFile = document.querySelector('#pdf').files[0];
+      const tocFile = document.querySelector('#toc').files[0];
+      const tocType = document.querySelector('#tocType').value; // 'json'|'tsv'
+      const pageOffset = parseInt(document.querySelector('#pageOffset').value || '0', 10);
+      const outdir = document.querySelector('#outdir').value || 'AIMA_Split';
+
+      if (!pdfFile || !tocFile) {
+        alert('Missing PDF or TOC file');
+        return;
+      }
+
+      // đọc nội dung TOC
+      const tocText = await tocFile.text();
+
+      // upload PDF lên supabase trước
+      const publicUrl = await uploadToSupabase(pdfFile);
+
+      // gọi API tách
+      await splitViaApi(publicUrl, tocText, tocType, pageOffset, outdir);
+    } catch (err) {
+      console.error(err);
+      alert('Error: ' + err.message);
+    }
+  }
+</script>
+
 </head>
 <body>
   <div class="container">

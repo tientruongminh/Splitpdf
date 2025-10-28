@@ -1,13 +1,12 @@
-# api/split.py  (Vercel Python Runtime - Flask WSGI)
+# api/split.py
 import io
 import json
 import zipfile
+import requests
 from pathlib import Path
 from typing import List, Tuple
-
 from flask import Flask, request, send_file, jsonify
-
-from splitter import split_pdf  # bạn đã có file splitter.py
+from splitter import split_pdf
 
 app = Flask(__name__)
 
@@ -58,55 +57,57 @@ def split_endpoint():
         return ("", 204)
 
     try:
-        if not request.content_type or "multipart/form-data" not in request.content_type:
-            return jsonify({"error": "Content-Type must be multipart/form-data"}), 400
+        payload = request.get_json(silent=True) or {}
+        if not payload:
+            return jsonify({"error": "Expect JSON body"}), 400
 
-        pdf_file = request.files.get("pdf")
-        toc_file = request.files.get("toc")
-        if not pdf_file or not toc_file:
-            return jsonify({"error": "Missing PDF or TOC file"}), 400
+        source = payload.get("source", "supabase")
+        if source != "supabase":
+            return jsonify({"error": "Unsupported source"}), 400
 
-        toc_type = request.form.get("toc_type", "json")
-        page_offset = int(request.form.get("page_offset", "0"))
-        outdir_name = request.form.get("outdir", "AIMA_Split")
+        file_url = payload.get("url")
+        toc_type = payload.get("toc_type", "json")
+        toc_text = payload.get("toc", "")
+        page_offset = int(payload.get("page_offset", 0))
+        outdir_name = payload.get("outdir", "AIMA_Split")
 
-        # lưu vào /tmp (chỉ tồn tại trong 1 request)
+        if not file_url or not toc_text:
+            return jsonify({"error": "Missing url or toc"}), 400
+
+        # tải file vào /tmp
         tmpdir = Path("/tmp")
         tmpdir.mkdir(exist_ok=True)
-        pdf_path = tmpdir / pdf_file.filename
-        pdf_file.save(pdf_path)
+        pdf_path = tmpdir / "input.pdf"
 
-        toc_text = toc_file.read().decode("utf-8", errors="ignore")
+        r = requests.get(file_url, timeout=60)
+        r.raise_for_status()
+        pdf_path.write_bytes(r.content)
+
+        # parse TOC
         toc = parse_json_toc(toc_text) if toc_type == "json" else parse_tsv(toc_text)
 
-        # outdir tạm
+        # chạy split
         outdir = tmpdir / outdir_name
         outdir.mkdir(exist_ok=True)
-
-        # gọi hàm xử lý của bạn: nên trả về danh sách tên file đã viết
-        # ví dụ: written = ["Ch01_Intro.pdf", "Ch02_Search.pdf", ...]
         written = split_pdf(pdf_path, toc, outdir, page_offset=page_offset)
 
         # nén ZIP vào memory
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for fname in written:
-                file_path = outdir / fname
-                # arcname để trong zip chỉ có tên file, không chứa path đầy đủ
-                zf.write(file_path, arcname=fname)
+                fp = outdir / fname
+                zf.write(fp, arcname=fname)
         zip_buf.seek(0)
 
-        # trả file zip trực tiếp cho client
-        download_name = f"{outdir_name}.zip"
         return send_file(
             zip_buf,
             mimetype="application/zip",
             as_attachment=True,
-            download_name=download_name
+            download_name=f"{outdir_name}.zip"
         )
 
     except Exception as e:
         import traceback
         return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
 
-# Vercel sẽ tự phát hiện biến `app` (Flask WSGI)
+# Vercel sẽ dùng biến app
