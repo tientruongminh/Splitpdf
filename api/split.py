@@ -1,11 +1,9 @@
-import json, os
+# api/split.py - SỬA LẠI
+import json
 from pathlib import Path
 from typing import List, Tuple
 from http.server import BaseHTTPRequestHandler
-from urllib.parse import parse_qs
-from io import BytesIO
-from splitter import split_pdf
-import tempfile
+from splitter import split_pdf  # ✅ Import từ splitter.py
 
 def parse_tsv(s: str) -> List[Tuple[str,int]]:
     out = []
@@ -23,8 +21,7 @@ def parse_tsv(s: str) -> List[Tuple[str,int]]:
     return out
 
 def parse_json_toc(s: str) -> List[Tuple[str,int]]:
-    import json as _json
-    data = _json.loads(s)
+    data = json.loads(s)
     entries = []
     if isinstance(data, list):
         for item in data:
@@ -57,13 +54,13 @@ class handler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error":"Content-Type must be multipart/form-data"})
                 return
 
-            # parse multipart
             import cgi
             form = cgi.FieldStorage(
                 fp=self.rfile,
                 headers=self.headers,
                 environ={"REQUEST_METHOD":"POST","CONTENT_TYPE":ctype}
             )
+            
             pdf_item = form["pdf"] if "pdf" in form else None
             toc_item = form["toc"] if "toc" in form else None
             toc_type = form.getvalue("toc_type", "json")
@@ -71,32 +68,41 @@ class handler(BaseHTTPRequestHandler):
             outdir_name = form.getvalue("outdir", "AIMA_Split")
 
             if not pdf_item or not toc_item:
-                self.send_json(400, {"error":"Missing files"})
+                self.send_json(400, {"error":"Missing PDF or TOC file"})
                 return
 
-            # lưu file vào /tmp
+            # Lưu file vào /tmp
             tmpdir = Path("/tmp")
             pdf_path = tmpdir / pdf_item.filename
             with open(pdf_path, "wb") as f:
                 f.write(pdf_item.file.read())
 
             toc_text = toc_item.file.read().decode("utf-8", errors="ignore")
+            
+            # Parse TOC
             if toc_type == "json":
                 toc = parse_json_toc(toc_text)
             else:
                 toc = parse_tsv(toc_text)
 
             outdir = tmpdir / outdir_name
+            outdir.mkdir(exist_ok=True)
+            
+            # Gọi splitter
             written = split_pdf(pdf_path, toc, outdir, page_offset=page_offset)
 
-            # trả danh sách file đã viết, bạn có thể đổi sang zip rồi trả URL tạm nếu muốn
             self.send_json(200, {
                 "ok": True,
                 "parts": [{"name": n} for n in written],
-                "index_tsv": str(outdir / "SPLIT_INDEX.tsv")  # nếu bạn cũng ghi file index trong split_pdf
+                "message": f"Successfully split into {len(written)} files"
             })
+            
         except Exception as e:
-            self.send_json(500, {"error": str(e)})
+            import traceback
+            self.send_json(500, {
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            })
 
     def send_json(self, code, obj):
         body = json.dumps(obj).encode("utf-8")
