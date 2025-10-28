@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PDF Chapter Splitter</title>
+  <style>
+    :root { --bg:#0b0f14; --panel:#121821; --text:#e8edf2; --muted:#9fb0c1; --accent:#4aa8ff; --ok:#22c55e; --err:#ef4444; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; background:var(--bg); color:var(--text); }
+    .wrap { max-width: 920px; margin: 32px auto; padding: 0 16px; }
+    .card { background: var(--panel); border-radius: 16px; padding: 20px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+    h1 { margin: 0 0 12px; font-size: 28px; }
+    p.top { margin: 0 0 20px; color: var(--muted); }
+    label { font-weight: 600; display: block; margin-bottom: 8px; }
+    .row { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    .field { background: #0f141c; border: 1px solid #1d2633; border-radius: 12px; padding: 14px; }
+    .field input[type="text"], .field input[type="number"] { width: 100%; border: none; outline: none; background: transparent; color: var(--text); font-size: 15px; }
+    .muted { color: var(--muted); font-size: 13px; margin-top: 6px; }
+    .filebox { display:flex; align-items:center; justify-content:space-between; gap: 12px; }
+    .filebox input[type="file"] { flex:1; }
+    .radios { display:flex; gap: 12px; align-items:center; }
+    .actions { display:flex; gap: 12px; margin-top: 16px; }
+    button { appearance:none; border:none; border-radius: 12px; padding: 12px 16px; font-weight:700; cursor:pointer; }
+    .primary { background: var(--accent); color:#00162a; }
+    .ghost { background: transparent; color: var(--text); border: 1px solid #243244; }
+    .log { margin-top: 20px; background: #0b1118; border: 1px solid #1a2433; border-radius: 12px; padding: 12px; height: 260px; overflow:auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 13px; white-space: pre-wrap; }
+    .ok { color: var(--ok); }
+    .err { color: var(--err); }
+    .help { margin-top:16px; color: var(--muted); font-size: 13px; }
+    .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+    @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>PDF Chapter Splitter</h1>
+      <p class="top">Split a PDF into chapter PDFs using a TOC of start pages. Matches the semantics of your <code>main.py</code> script.</p>
+
+      <form id="splitForm">
+        <div class="row">
+          <div class="field">
+            <label for="pdf">PDF file</label>
+            <div class="filebox">
+              <input id="pdf" name="pdf" type="file" accept="application/pdf" required />
+            </div>
+            <div class="muted">Large files are supported. The server performs the split.</div>
+          </div>
+
+          <div class="field">
+            <label>TOC format</label>
+            <div class="radios">
+              <label><input type="radio" name="toc_type" value="json" checked /> JSON</label>
+              <label><input type="radio" name="toc_type" value="tsv" /> TSV</label>
+            </div>
+            <div class="muted">JSON supports list or dict, nested dicts will be flattened. TSV uses lines like <code>start\tTitle</code>.</div>
+          </div>
+
+          <div class="field">
+            <label for="toc">TOC file</label>
+            <div class="filebox">
+              <input id="toc" name="toc" type="file" accept=".json,.tsv,.txt,application/json,text/tab-separated-values,text/plain" required />
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="field">
+              <label for="page_offset">Page offset</label>
+              <input id="page_offset" name="page_offset" type="number" step="1" value="0" />
+              <div class="muted">If book page 1 is PDF page 17, use 16.</div>
+            </div>
+            <div class="field">
+              <label for="outdir">Output folder name</label>
+              <input id="outdir" name="outdir" type="text" value="AIMA_Split" />
+              <div class="muted">Server will create this folder and save results there.</div>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button type="submit" class="primary">Split PDF</button>
+            <button type="button" id="btnClear" class="ghost">Clear log</button>
+          </div>
+        </div>
+      </form>
+
+      <div id="log" class="log" aria-live="polite"></div>
+
+      <div class="help">
+        <strong>How it works</strong>
+        <ol>
+          <li>This page posts your files to <code>/api/split</code> using <code>multipart/form-data</code>.</li>
+          <li>The backend should call your Python splitter with the provided arguments and stream logs.</li>
+          <li>When completed, the backend can respond with a JSON summary and optional download links or a zipped folder.</li>
+        </ol>
+        <div>Tip: if you need a ready server, create a minimal Flask endpoint that imports your module and invokes <code>split_pdf</code>. I can provide that if you want.</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('splitForm');
+    const logBox = document.getElementById('log');
+    const btnClear = document.getElementById('btnClear');
+
+    function log(line, cls) {
+      const span = document.createElement('div');
+      if (cls) span.className = cls;
+      span.textContent = line;
+      logBox.appendChild(span);
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    btnClear.addEventListener('click', () => { logBox.textContent = ''; });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      logBox.textContent = '';
+
+      const pdf = document.getElementById('pdf').files[0];
+      const toc = document.getElementById('toc').files[0];
+      const tocType = new FormData(form).get('toc_type');
+      const pageOffset = document.getElementById('page_offset').value || '0';
+      const outdir = document.getElementById('outdir').value || 'AIMA_Split';
+
+      if (!pdf || !toc) {
+        log('Select both PDF and TOC files.', 'err');
+        return;
+      }
+
+      const fd = new FormData();
+      fd.append('pdf', pdf);
+      fd.append('toc', toc);
+      fd.append('toc_type', tocType);
+      fd.append('page_offset', pageOffset);
+      fd.append('outdir', outdir);
+
+      try {
+        log('Uploading files and starting split...');
+        const res = await fetch('/api/split', { method: 'POST', body: fd });
+
+        const ctype = res.headers.get('content-type') || '';
+        if (ctype.includes('text/event-stream')) {
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder('utf-8');
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            chunk.split('\n').forEach(line => {
+              if (!line) return;
+              if (line.startsWith('data:')) {
+                const msg = line.slice(5).trim();
+                try { const obj = JSON.parse(msg); handleEvent(obj); }
+                catch { log(msg); }
+              } else {
+                log(line);
+              }
+            });
+          }
+        } else if (ctype.includes('application/json')) {
+          const data = await res.json();
+          handleDoneJson(data);
+        } else {
+          const text = await res.text();
+          log(text);
+        }
+      } catch (err) {
+        log('Client error: ' + (err && err.message ? err.message : err), 'err');
+      }
+    });
+
+    function handleEvent(evt) {
+      if (evt.type === 'log') log(evt.message);
+      if (evt.type === 'progress') log(`Progress ${evt.current}/${evt.total}: ${evt.message}`);
+      if (evt.type === 'error') log(`Error: ${evt.message}`, 'err');
+      if (evt.type === 'ok') log(evt.message, 'ok');
+      if (evt.type === 'done') handleDoneJson(evt.payload || {});
+    }
+
+    function handleDoneJson(data) {
+      if (data.error) {
+        log('Server error: ' + data.error, 'err');
+        return;
+      }
+      if (data.index_tsv) log('Index TSV: ' + data.index_tsv, 'ok');
+      if (Array.isArray(data.parts)) {
+        log('Written files:', 'ok');
+        for (const p of data.parts) {
+          if (p.url) log(`• ${p.name} → ${p.url}`);
+          else log(`• ${p.name}`);
+        }
+      }
+      if (data.zip_url) {
+        const a = document.createElement('a');
+        a.href = data.zip_url; a.textContent = 'Download ZIP of chapters'; a.target = '_blank';
+        const div = document.createElement('div');
+        div.appendChild(a); logBox.appendChild(div);
+      }
+      log('Split complete.', 'ok');
+    }
+  </script>
+</body>
+</html>
