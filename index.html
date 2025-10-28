@@ -783,7 +783,7 @@ async function callSplitApi(pdfUrl, tocContent, tocType, pageOffset, outdir) {
   log('Đang gọi API để xử lý PDF...');
 
   // Gọi đến server Python local (sau này đổi thành Heroku URL)
-  const PYTHON_SERVER = 'https://pdf-splitter.onrender.com';
+  const PYTHON_SERVER = 'https://splitpdf-blor.onrender.com';
   
   try {
     const response = await fetch(`${PYTHON_SERVER}/api/split-supabase`, {

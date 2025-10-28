@@ -6,8 +6,10 @@ import zipfile
 import io
 import time
 import os
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app, origins=['https://splitpdf-blor.onrender.com', 'http://localhost:3000', 'https://your-frontend.vercel.app'])
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR = BASE_DIR / "outputs"
@@ -294,7 +296,13 @@ def download_file(filename):
 @app.route('/toc-generator')
 def toc_generator():
     return send_from_directory('.', 'toc_generator.html')
-
+@app.route('/api/test', methods=['GET'])
+def test_api():
+    return jsonify({
+        "status": "success", 
+        "message": "API is working!",
+        "timestamp": time.time()
+    })
 if __name__ == '__main__':
     # QUAN TRỌNG: Sửa port binding cho Render
     port = int(os.environ.get('PORT', 3000))
