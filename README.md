@@ -1,4 +1,3 @@
-Dưới đây là phiên bản **README.md** chuyên nghiệp, ngắn gọn, không dùng icon — phù hợp cho GitHub hoặc Vercel public repo:
 
 ---
 
