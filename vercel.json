@@ -2,23 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "api/**/*.py": {
-      "maxDuration": 60,
-      "includeFiles": ["splitter.py"],
-      "excludeFiles": [
-        ".venv/**",
-        "__pycache__/**",
-        "uploads/**",
-        "outputs/**",
-        "*.pdf",
-        "*.zip",
-        "*.npy",
-        "*.parquet",
-        "*.pkl",
-        "*.joblib",
-        "*.log",
-        "tests/**",
-        "docs/**"
-      ]
+      "maxDuration": 60
     }
   },
   "rewrites": [
