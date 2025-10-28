@@ -4,120 +4,40 @@ import json
 import zipfile
 import requests
 from pathlib import Path
-from typing import List, Tuple
-
-def parse_tsv(s: str) -> List[Tuple[str, int]]:
-    out = []
-    for line in s.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split("\t")
-        if len(parts) < 2:
-            raise ValueError("TSV line invalid")
-        start = int(parts[0])
-        title = parts[1].strip()
-        out.append((title, start))
-    out.sort(key=lambda x: x[1])
-    return out
-
-def parse_json_toc(s: str) -> List[Tuple[str, int]]:
-    data = json.loads(s)
-    entries = []
-    if isinstance(data, list):
-        for item in data:
-            entries.append((str(item["title"]), int(item["start"])))
-    elif isinstance(data, dict):
-        def rec(d):
-            for k, v in d.items():
-                if isinstance(v, dict):
-                    yield from rec(v)
-                else:
-                    yield (str(k), int(v))
-        entries = list(rec(data))
-    else:
-        raise ValueError("Unsupported JSON structure")
-    entries.sort(key=lambda x: x[1])
-    return entries
-
-def sanitize_filename(name: str) -> str:
-    import re
-    name = re.sub(r"[^\w\s\-\.]", "", name).strip()
-    name = re.sub(r"\s+", "_", name)
-    return name[:180]
-
-def split_pdf_vercel(pdf_buffer, toc: List[Tuple[str,int]], page_offset: int = 0):
-    from pypdf import PdfReader, PdfWriter
-    import re
-    
-    reader = PdfReader(pdf_buffer)
-    total = len(reader.pages)
-    ranges = []
-    
-    for i, (title, start_book) in enumerate(toc):
-        pdf_start = start_book + page_offset - 1
-        pdf_end = (toc[i+1][1] + page_offset - 2) if i < len(toc)-1 else total-1
-        pdf_end = min(pdf_end, total-1)
-        if pdf_start < 0 or pdf_start >= total or pdf_end < pdf_start:
-            raise ValueError("Invalid TOC or page_offset")
-        ranges.append((title, pdf_start, pdf_end))
-
-    written_files = {}
-    
-    for idx, (title, s, e) in enumerate(ranges, 1):
-        # tên file như trong script của bạn
-        m = re.match(r"^(\d+)\s+(.+)$", title.strip())
-        if m:
-            fname = f"Ch{int(m.group(1)):02d}_{sanitize_filename(m.group(2))}.pdf"
-        else:
-            fname = f"Part_{idx:02d}_{sanitize_filename(title)}.pdf"
-        
-        w = PdfWriter()
-        for p in range(s, e+1):
-            w.add_page(reader.pages[p])
-        
-        # Save to bytes buffer
-        pdf_buffer = io.BytesIO()
-        w.write(pdf_buffer)
-        pdf_buffer.seek(0)
-        
-        written_files[fname] = pdf_buffer.getvalue()
-    
-    return written_files
 
 def handler(request):
-    import json as json_module
+    # Set CORS headers
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type"
+    }
     
     if request.method == "OPTIONS":
         return {
             "statusCode": 204,
-            "headers": {
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "POST, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type"
-            }
+            "headers": headers
         }
 
     try:
         # Parse JSON body
-        body = request.get_json()
-        
-        if not body:
+        if hasattr(request, 'body'):
+            body = json.loads(request.body)
+        else:
             return {
                 "statusCode": 400,
-                "headers": {
-                    "Access-Control-Allow-Origin": "*",
-                    "Content-Type": "application/json"
-                },
-                "body": json_module.dumps({"error": "Expect JSON body"})
+                "headers": {**headers, "Content-Type": "application/json"},
+                "body": json.dumps({"error": "No body received"})
             }
+
+        print("Received request body:", body)  # Debug log
 
         source = body.get("source", "supabase")
         if source != "supabase":
             return {
                 "statusCode": 400,
-                "headers": {"Access-Control-Allow-Origin": "*", "Content-Type": "application/json"},
-                "body": json_module.dumps({"error": "Unsupported source"})
+                "headers": {**headers, "Content-Type": "application/json"},
+                "body": json.dumps({"error": "Unsupported source"})
             }
 
         file_url = body.get("url")
@@ -129,48 +49,126 @@ def handler(request):
         if not file_url or not toc_text:
             return {
                 "statusCode": 400,
-                "headers": {"Access-Control-Allow-Origin": "*", "Content-Type": "application/json"},
-                "body": json_module.dumps({"error": "Missing url or toc"})
+                "headers": {**headers, "Content-Type": "application/json"},
+                "body": json.dumps({"error": "Missing url or toc"})
             }
 
+        print(f"Downloading PDF from: {file_url}")  # Debug log
+
         # Download PDF from Supabase
-        r = requests.get(file_url, timeout=60)
-        r.raise_for_status()
-        pdf_buffer = io.BytesIO(r.content)
+        response = requests.get(file_url, timeout=60)
+        response.raise_for_status()
+        
+        print(f"PDF downloaded, size: {len(response.content)} bytes")  # Debug log
 
         # Parse TOC
-        toc = parse_json_toc(toc_text) if toc_type == "json" else parse_tsv(toc_text)
+        if toc_type == "json":
+            toc_data = json.loads(toc_text)
+            if isinstance(toc_data, list):
+                toc = [(str(item["title"]), int(item["start"])) for item in toc_data]
+            else:
+                def extract_toc(d):
+                    entries = []
+                    for k, v in d.items():
+                        if isinstance(v, dict):
+                            entries.extend(extract_toc(v))
+                        else:
+                            entries.append((str(k), int(v)))
+                    return entries
+                toc = extract_toc(toc_data)
+        else:  # TSV
+            toc = []
+            for line in toc_text.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split("\t")
+                if len(parts) >= 2:
+                    toc.append((parts[1].strip(), int(parts[0])))
+        
+        toc.sort(key=lambda x: x[1])
+        print(f"Parsed TOC with {len(toc)} chapters")  # Debug log
 
-        # Split PDF
-        written_files = split_pdf_vercel(pdf_buffer, toc, page_offset=page_offset)
+        # Process PDF
+        from pypdf import PdfReader, PdfWriter
+        
+        pdf_buffer = io.BytesIO(response.content)
+        reader = PdfReader(pdf_buffer)
+        total_pages = len(reader.pages)
+        
+        print(f"PDF has {total_pages} pages")  # Debug log
 
-        # Create ZIP in memory
+        # Calculate page ranges
+        ranges = []
+        for i, (title, start_book) in enumerate(toc):
+            pdf_start = start_book + page_offset - 1
+            pdf_end = (toc[i+1][1] + page_offset - 2) if i < len(toc)-1 else total_pages-1
+            pdf_end = min(pdf_end, total_pages-1)
+            
+            if pdf_start < 0 or pdf_start >= total_pages or pdf_end < pdf_start:
+                raise ValueError(f"Invalid page range for chapter: {title}")
+                
+            ranges.append((title, pdf_start, pdf_end))
+
+        # Create PDF files in memory
+        written_files = {}
+        for idx, (title, start, end) in enumerate(ranges, 1):
+            print(f"Processing chapter {idx}: {title} (pages {start}-{end})")  # Debug log
+            
+            writer = PdfWriter()
+            for page_num in range(start, end + 1):
+                writer.add_page(reader.pages[page_num])
+            
+            # Generate filename
+            import re
+            def sanitize_filename(name):
+                name = re.sub(r"[^\w\s\-\.]", "", name).strip()
+                name = re.sub(r"\s+", "_", name)
+                return name[:180]
+            
+            match = re.match(r"^(\d+)\s+(.+)$", title.strip())
+            if match:
+                filename = f"Ch{int(match.group(1)):02d}_{sanitize_filename(match.group(2))}.pdf"
+            else:
+                filename = f"Part_{idx:02d}_{sanitize_filename(title)}.pdf"
+            
+            # Save to bytes buffer
+            chapter_buffer = io.BytesIO()
+            writer.write(chapter_buffer)
+            written_files[filename] = chapter_buffer.getvalue()
+
+        # Create ZIP
         zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            for fname, content in written_files.items():
-                zf.writestr(fname, content)
-        zip_buffer.seek(0)
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for filename, content in written_files.items():
+                zipf.writestr(filename, content)
+        
+        zip_data = zip_buffer.getvalue()
+        print(f"Created ZIP file, size: {len(zip_data)} bytes")  # Debug log
 
+        # Return ZIP file
         return {
             "statusCode": 200,
             "headers": {
-                "Access-Control-Allow-Origin": "*",
+                **headers,
                 "Content-Type": "application/zip",
                 "Content-Disposition": f"attachment; filename={outdir_name}.zip"
             },
-            "body": zip_buffer.getvalue().decode('latin-1')  # For binary data in Vercel
+            "body": zip_data.hex()  # Encode binary as hex for Vercel
         }
 
     except Exception as e:
         import traceback
+        error_msg = str(e)
+        traceback_msg = traceback.format_exc()
+        print(f"Error: {error_msg}")  # Debug log
+        print(f"Traceback: {traceback_msg}")  # Debug log
+        
         return {
             "statusCode": 500,
-            "headers": {
-                "Access-Control-Allow-Origin": "*", 
-                "Content-Type": "application/json"
-            },
-            "body": json_module.dumps({
-                "error": str(e),
-                "traceback": traceback.format_exc()
+            "headers": {**headers, "Content-Type": "application/json"},
+            "body": json.dumps({
+                "error": error_msg,
+                "traceback": traceback_msg
             })
         }

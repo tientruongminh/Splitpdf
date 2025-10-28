@@ -782,27 +782,41 @@
 async function callSplitApi(pdfUrl, tocContent, tocType, pageOffset, outdir) {
   log('Đang gọi API để xử lý PDF...');
 
-  const response = await fetch('/api/split', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      source: 'supabase',
-      url: pdfUrl,
-      toc_type: tocType,
-      toc: tocContent,
-      page_offset: parseInt(pageOffset),
-      outdir: outdir
-    })
-  });
+  try {
+    const response = await fetch('/api/split', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        source: 'supabase',
+        url: pdfUrl,
+        toc_type: tocType,
+        toc: tocContent,
+        page_offset: parseInt(pageOffset),
+        outdir: outdir
+      })
+    });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { error: errorText };
+      }
+      throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    // Get the response as array buffer for binary data
+    const arrayBuffer = await response.arrayBuffer();
+    return new Blob([arrayBuffer], { type: 'application/zip' });
+    
+  } catch (error) {
+    console.error('API call failed:', error);
+    throw error;
   }
-
-  return await response.blob();
 }
 
     // Read TOC File
