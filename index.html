@@ -782,8 +782,11 @@
 async function callSplitApi(pdfUrl, tocContent, tocType, pageOffset, outdir) {
   log('Đang gọi API để xử lý PDF...');
 
+  // Gọi đến server Python local (sau này đổi thành Heroku URL)
+  const PYTHON_SERVER = 'http://localhost:3000';
+  
   try {
-    const response = await fetch('/api/split', {
+    const response = await fetch(`${PYTHON_SERVER}/api/split-supabase`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -799,19 +802,35 @@ async function callSplitApi(pdfUrl, tocContent, tocType, pageOffset, outdir) {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      let errorData;
-      try {
-        errorData = JSON.parse(errorText);
-      } catch {
-        errorData = { error: errorText };
-      }
-      throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    // Get the response as array buffer for binary data
-    const arrayBuffer = await response.arrayBuffer();
-    return new Blob([arrayBuffer], { type: 'application/zip' });
+    // Xử lý Server-Sent Events (streaming response)
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n');
+      
+      for (const line of lines) {
+        if (!line.trim() || !line.startsWith('data:')) continue;
+        
+        const data = line.slice(5).trim();
+        try {
+          const evt = JSON.parse(data);
+          handleEvent(evt);
+        } catch {
+          log(data);
+        }
+      }
+    }
+    
+    // Trả về blob rỗng vì file download được xử lý qua SSE
+    return new Blob(['Processing complete']);
     
   } catch (error) {
     console.error('API call failed:', error);
