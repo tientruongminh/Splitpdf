@@ -1,144 +1,199 @@
-# 📘 AIMA Splitter — Tự động cắt sách *Artificial Intelligence: A Modern Approach* theo từng chương
-
-Công cụ này giúp bạn **tự động chia file PDF của sách AIMA** (Artificial Intelligence: A Modern Approach) thành **từng chương riêng biệt**, dựa trên bảng mục lục (TOC) và số trang bắt đầu từng chương.
+Dưới đây là phiên bản **README.md** chuyên nghiệp, ngắn gọn, không dùng icon — phù hợp cho GitHub hoặc Vercel public repo:
 
 ---
 
-## 🧩 Cấu trúc thư mục
+# Split AIMA – PDF Chapter Splitter with TOC
+
+### Overview
+
+Split AIMA is a lightweight web application for splitting large PDF documents into chapters based on a provided Table of Contents (TOC).
+The system supports both JSON and TSV TOC formats, can be run locally with Flask, or deployed serverlessly on Vercel.
+
+---
+
+## Features
+
+* Upload a PDF file and a TOC file (JSON or TSV)
+* Support for `page_offset` to align TOC numbering with actual PDF pages
+* Automatically generates and returns a single ZIP file containing all split chapters
+* Fully compatible with Vercel’s Python runtime (serverless)
+* CORS-enabled API for easy frontend integration
+
+---
+
+## Project Structure
 
 ```
 split_AIMA/
-│
-├── AI.pdf                   # File PDF gốc (AIMA)
-├── aima_toc.tsv             # Bảng TOC gồm tên chương và số trang bắt đầu
-├── split_pdf_by_chapters.py # Script cắt PDF
-└── README.md
+├─ api/
+│  └─ split.py              # Serverless API endpoint for Vercel
+├─ splitter.py              # Core logic for PDF splitting
+├─ index.html               # Main web interface
+├─ toc_generator.html       # TOC generator page
+├─ requirements.txt         # Dependencies
+├─ vercel.json              # Vercel configuration
+├─ README.md
+├─ uploads/                 # Temporary folder (ignored in deployment)
+├─ outputs/                 # Temporary folder (ignored in deployment)
+└─ server.py                # Local Flask server for testing
 ```
 
 ---
 
-## ⚙️ Cài đặt
+## Local Development
 
-### 1. Cài thư viện phụ thuộc
-Chỉ cần `pypdf` để đọc và ghi PDF:
+### 1. Create and activate virtual environment
+
 ```bash
-pip install pypdf
+python -m venv .venv
+source .venv/bin/activate        # On Windows: .venv\Scripts\activate
 ```
 
----
+### 2. Install dependencies
 
-## 🚀 Cách dùng
-
-### 🧠 Thông tin cơ bản
-- File TOC (`aima_toc.tsv`) chứa số trang bắt đầu của từng chương (đã trích thủ công từ sách).  
-- Trong bản PDF chính thức, **book page 1 tương ứng với PDF page 20**,  
-  nên cần đặt `--page-offset 19`.
-
----
-
-### ▶️ Cách chạy trên Linux / WSL / macOS
 ```bash
-python split_pdf_by_chapters.py   --pdf "AI.pdf"   --toc-tsv "aima_toc.tsv"   --outdir "AIMA_Split"   --page-offset 19
+pip install -r requirements.txt
 ```
 
-### ▶️ Cách chạy trên Windows PowerShell / CMD
-```powershell
-python split_pdf_by_chapters.py --pdf "AI.pdf" --toc-tsv "aima_toc.tsv" --outdir "AIMA_Split" --page-offset 19
+### 3. Run locally
+
+```bash
+python server.py
 ```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-## 📁 Kết quả sau khi chạy
+## Deploying to Vercel
 
-Thư mục `AIMA_Split/` sẽ được tạo, chứa:
+### Step 1: Push to GitHub
+
+```bash
+git init
+git add .
+git commit -m "Initial commit"
+git branch -M main
+git remote add origin https://github.com/<yourname>/split_AIMA.git
+git push -u origin main
 ```
-AIMA_Split/
-├── Ch01_Introduction.pdf
-├── Ch02_Intelligent_Agents.pdf
-├── Ch03_Solving_Problems_by_Searching.pdf
-...
-├── Ch27_AI_The_Present_and_Future.pdf
-├── Appendix_A_Mathematical_background.pdf
-├── Appendix_B_Notes_on_Languages_and_Algorithms.pdf
-├── Bibliography.pdf
-└── SPLIT_INDEX.tsv  # Log chứa phạm vi trang cắt cho từng chương
-```
+
+### Step 2: Deploy
+
+1. Go to [https://vercel.com](https://vercel.com)
+2. Select “New Project” → “Import from GitHub”
+3. Choose the `split_AIMA` repository
+4. Wait for the build to complete
 
 ---
 
-## 🧾 File TOC: `aima_toc.tsv`
+## Vercel Configuration
 
-Đã được định dạng sẵn với 2 cột:  
-`<book_page_number>   <chapter_title>`
+**vercel.json**
 
-Ví dụ:
-```
-1	1 Introduction
-34	2 Intelligent Agents
-64	3 Solving Problems by Searching
-120	4 Beyond Classical Search
-161	5 Adversarial Search
-...
-1044	27 AI: The Present and Future
-1053	Appendix A - Mathematical background
-1060	Appendix B - Notes on Languages and Algorithms
-1063	Bibliography
-```
-
----
-
-## 🧮 Giải thích `--page-offset`
-
-**`page-offset` = (PDF_page_bắt_đầu_book_1) - 1**
-
-Ví dụ:
-- Nếu trang 1 trong sách tương ứng với trang 20 trong PDF → `--page-offset 19`
-- Nếu PDF bắt đầu ngay từ trang 1 của sách → `--page-offset 0`
-
----
-
-## 🧰 Tuỳ chọn nâng cao
-
-### Dùng TOC dạng JSON thay vì TSV
-Bạn có thể chuyển TOC sang JSON, ví dụ:
 ```json
 {
-  "1 Introduction": 1,
-  "2 Intelligent Agents": 34,
-  "3 Solving Problems by Searching": 64
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/**/*.py": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
 ```
 
-Chạy:
-```bash
-python split_pdf_by_chapters.py --pdf "AI.pdf" --toc-json "aima_toc.json" --page-offset 19
+**.vercelignore**
+
+```
+.venv/
+__pycache__/
+uploads/
+outputs/
+*.pdf
+*.zip
+*.npy
+*.pkl
+*.joblib
+*.parquet
+*.log
+tests/
+docs/
 ```
 
 ---
 
-## 🧑‍💻 Ghi chú kỹ thuật
+## API Usage Example
 
-- Script sử dụng [PyPDF](https://pypi.org/project/pypdf/) (phiên bản 3+)
-- Hoạt động tốt với file PDF gốc AIMA 4th Edition (Pearson)
-- Hỗ trợ UTF-8 (có thể xử lý tiêu đề tiếng Việt)
-- Tự động sắp xếp chương theo thứ tự số trang trong TOC
+```js
+const form = new FormData();
+form.append('pdf', pdfInput.files[0]);
+form.append('toc', tocInput.files[0]);
+form.append('toc_type', 'json');  // or 'tsv'
+form.append('page_offset', '0');
+form.append('outdir', 'AIMA_Split');
+
+const res = await fetch('/api/split', { method: 'POST', body: form });
+if (res.ok) {
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'AIMA_Split.zip';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+```
 
 ---
 
-## 📄 Giấy phép
+## TOC Formats
 
-MIT License © 2025 — bạn có thể sử dụng tự do cho mục đích cá nhân hoặc học tập.  
-Tác giả cấu trúc script và TOC: **TienCD**
+**JSON format**
+
+```json
+[
+  { "title": "1 Introduction", "start": 1 },
+  { "title": "2 Search Algorithms", "start": 35 },
+  { "title": "3 Knowledge Representation", "start": 87 }
+]
+```
+
+**TSV format**
+
+```
+1   Introduction
+35  Search Algorithms
+87  Knowledge Representation
+```
 
 ---
 
-## ✨ Mẹo nhỏ
+## Example Output
 
-Sau khi tách chương, bạn có thể:
-- Đưa từng chương vào Kindle / iPad để đọc riêng.
-- Dùng các chương nhỏ để huấn luyện mô hình NLP hoặc RAG.
-- Gắn metadata (programmatically) để tạo index cho chatbot học theo từng chương.
+```
+AIMA_Split.zip
+ ├─ Ch01_Introduction.pdf
+ ├─ Ch02_Search_Algorithms.pdf
+ └─ Ch03_Knowledge_Representation.pdf
+```
 
 ---
 
-**Enjoy reading & experimenting with AIMA! 🚀**
+## Dependencies
+
+| Package | Purpose                         |
+| ------- | ------------------------------- |
+| Flask   | Local and serverless web server |
+| pypdf   | PDF reading and writing         |
+| json    | TOC parsing                     |
+| zipfile | Create ZIP output file          |
+
+---
+
+## License
+
+MIT License © 2025 MinhTienCD
+

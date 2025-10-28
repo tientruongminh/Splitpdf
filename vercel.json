@@ -1,11 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
-    "api/**/*.py": {
-      "maxDuration": 60
-    }
+    "api/**/*.py": { "maxDuration": 60 }
   },
   "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/toc-generator", "destination": "/toc_generator.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
