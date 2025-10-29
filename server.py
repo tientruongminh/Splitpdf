@@ -99,6 +99,21 @@ def api_split():
             from pypdf import PdfReader, PdfWriter
             
             yield f'data: {json.dumps({"type": "log", "message": "✅ Đã tải file lên thành công"})}\n\n'
+            
+            # Cleanup old files
+            outdir = OUTPUT_DIR / outdir_name
+            zip_filename = f"{outdir_name}.zip"
+            zip_path = OUTPUT_DIR / zip_filename
+            
+            if outdir.exists():
+                import shutil
+                shutil.rmtree(outdir)
+                yield f'data: {json.dumps({"type": "log", "message": "🧹 Đã xóa thư mục cũ"})}\n\n'
+            
+            if zip_path.exists():
+                zip_path.unlink()
+                yield f'data: {json.dumps({"type": "log", "message": "🧹 Đã xóa ZIP cũ"})}\n\n'
+            
             yield f'data: {json.dumps({"type": "log", "message": "📖 Đang đọc mục lục..."})}\n\n'
             
             if toc_type == 'json':
@@ -155,10 +170,22 @@ def api_split():
             zip_filename = f"{outdir_name}.zip"
             zip_path = OUTPUT_DIR / zip_filename
             
+            # Xóa ZIP cũ nếu có
+            if zip_path.exists():
+                zip_path.unlink()
+            
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for fname in written:
                     file_path = outdir / fname
+                    if not file_path.exists():
+                        raise FileNotFoundError(f"File không tồn tại: {file_path}")
+                    file_size = file_path.stat().st_size
+                    yield f'data: {json.dumps({"type": "log", "message": f"📦 Đang thêm vào ZIP: {fname} ({file_size} bytes)"})}\n\n'
                     zipf.write(file_path, fname)
+            
+            # Kiểm tra ZIP đã tạo
+            zip_size = zip_path.stat().st_size
+            yield f'data: {json.dumps({"type": "log", "message": f"✅ ZIP đã tạo: {zip_filename} ({zip_size} bytes)"})}\n\n'
             
             yield f'data: {json.dumps({"type": "ok", "message": "🎉 Hoàn thành! Tất cả các chương đã được tách thành công"})}\n\n'
             yield f'data: {json.dumps({"type": "done", "payload": {"ok": True, "parts": [{"name": n} for n in written], "zip_url": f"/download/{zip_filename}", "total": len(written)}})}\n\n'
@@ -211,6 +238,21 @@ def api_split_supabase():
                 from pypdf import PdfReader, PdfWriter
                 
                 yield f'data: {json.dumps({"type": "log", "message": "✅ Đã tải PDF từ Supabase"})}\n\n'
+                
+                # Cleanup old files
+                outdir = OUTPUT_DIR / outdir_name
+                zip_filename = f"{outdir_name}.zip"
+                zip_path = OUTPUT_DIR / zip_filename
+                
+                if outdir.exists():
+                    import shutil
+                    shutil.rmtree(outdir)
+                    yield f'data: {json.dumps({"type": "log", "message": "🧹 Đã xóa thư mục cũ"})}\n\n'
+                
+                if zip_path.exists():
+                    zip_path.unlink()
+                    yield f'data: {json.dumps({"type": "log", "message": "🧹 Đã xóa ZIP cũ"})}\n\n'
+                
                 yield f'data: {json.dumps({"type": "log", "message": "📖 Đang đọc mục lục..."})}\n\n'
                 
                 if toc_type == 'json':
@@ -267,10 +309,22 @@ def api_split_supabase():
                 zip_filename = f"{outdir_name}.zip"
                 zip_path = OUTPUT_DIR / zip_filename
                 
+                # Xóa ZIP cũ nếu có
+                if zip_path.exists():
+                    zip_path.unlink()
+                
                 with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                     for fname in written:
                         file_path = outdir / fname
+                        if not file_path.exists():
+                            raise FileNotFoundError(f"File không tồn tại: {file_path}")
+                        file_size = file_path.stat().st_size
+                        yield f'data: {json.dumps({"type": "log", "message": f"📦 Đang thêm vào ZIP: {fname} ({file_size} bytes)"})}\n\n'
                         zipf.write(file_path, fname)
+                
+                # Kiểm tra ZIP đã tạo
+                zip_size = zip_path.stat().st_size
+                yield f'data: {json.dumps({"type": "log", "message": f"✅ ZIP đã tạo: {zip_filename} ({zip_size} bytes)"})}\n\n'
                 
                 yield f'data: {json.dumps({"type": "ok", "message": "🎉 Hoàn thành! Tất cả các chương đã được tách thành công"})}\n\n'
                 yield f'data: {json.dumps({"type": "done", "payload": {"ok": True, "parts": [{"name": n} for n in written], "zip_url": f"/download/{zip_filename}", "total": len(written)}})}\n\n'
@@ -291,10 +345,25 @@ def api_split_supabase():
 
 @app.route('/download/<filename>')
 def download_file(filename):
+    file_path = OUTPUT_DIR / filename
+    
+    # Kiểm tra file tồn tại
+    if not file_path.exists():
+        return jsonify({'error': 'File không tồn tại'}), 404
+    
+    # Kiểm tra file có phải ZIP và không bị corrupt
+    if filename.endswith('.zip'):
+        try:
+            with zipfile.ZipFile(file_path, 'r') as test_zip:
+                test_zip.testzip()  # Test integrity
+        except Exception as e:
+            return jsonify({'error': f'ZIP file bị hỏng: {str(e)}'}), 500
+    
     return send_file(
-        OUTPUT_DIR / filename,
+        file_path,
         as_attachment=True,
-        download_name=filename
+        download_name=filename,
+        mimetype='application/zip' if filename.endswith('.zip') else 'application/pdf'
     )
 
 @app.route('/toc-generator')
