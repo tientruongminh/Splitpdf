@@ -52,7 +52,11 @@ def parse_json_toc(s: str):
 
 def sanitize_filename(name: str) -> str:
     import re
-    name = re.sub(r"[^\w\s\-\.]", "", name).strip()
+    # Loại bỏ dấu chấm ở đầu/cuối trước
+    name = name.strip().strip('.')
+    # Chỉ giữ ký tự chữ, số, khoảng trắng, dấu gạch ngang
+    name = re.sub(r"[^\w\s\-]", "", name).strip()
+    # Thay khoảng trắng thành gạch dưới
     name = re.sub(r"\s+", "_", name)
     return name[:180]
 
@@ -296,6 +300,7 @@ def download_file(filename):
 @app.route('/toc-generator')
 def toc_generator():
     return send_from_directory('.', 'toc_generator.html')
+
 @app.route('/api/test', methods=['GET'])
 def test_api():
     return jsonify({
@@ -303,11 +308,11 @@ def test_api():
         "message": "API is working!",
         "timestamp": time.time()
     })
+
 if __name__ == '__main__':
-    # QUAN TRỌNG: Sửa port binding cho Render
     port = int(os.environ.get('PORT', 3000))
     app.run(
-        host='0.0.0.0',  # ← THAY ĐỔI QUAN TRỌNG
+        host='0.0.0.0',
         port=port, 
-        debug=False  # ← Tắt debug mode trên production
+        debug=False
     )
