@@ -188,7 +188,7 @@ def api_split():
             yield f'data: {json.dumps({"type": "log", "message": f"✅ ZIP đã tạo: {zip_filename} ({zip_size} bytes)"})}\n\n'
             
             yield f'data: {json.dumps({"type": "ok", "message": "🎉 Hoàn thành! Tất cả các chương đã được tách thành công"})}\n\n'
-            yield f'data: {json.dumps({"type": "done", "payload": {"ok": True, "parts": [{"name": n} for n in written], "zip_url": f"/download/{zip_filename}", "total": len(written)}})}\n\n'
+            yield f'data: {json.dumps({"type": "done", "payload": {"ok": True, "parts": [{"name": n} for n in written], "zip_url": download_url, "total": len(written)}})}\n\n'
 
         except Exception as e:
             import traceback
@@ -326,8 +326,38 @@ def api_split_supabase():
                 zip_size = zip_path.stat().st_size
                 yield f'data: {json.dumps({"type": "log", "message": f"✅ ZIP đã tạo: {zip_filename} ({zip_size} bytes)"})}\n\n'
                 
+                # Mặc định dùng download local
+                download_url = f"/download/{zip_filename}"
+                
+                # Thử upload ZIP lên Supabase nếu PDF đến từ Supabase
+                try:
+                    yield f'data: {json.dumps({"type": "log", "message": "☁️ Đang upload ZIP lên Supabase..."})}\n\n'
+                    
+                    # Extract bucket name từ URL
+                    import re
+                    match = re.search(r'supabase\.co/storage/v1/object/public/([^/]+)/', data.get('url', ''))
+                    if match:
+                        bucket_name = match.group(1)
+                        base_url = data['url'].split('/storage/v1')[0]
+                        
+                        # Upload ZIP với Supabase REST API
+                        import requests
+                        upload_url = f"{base_url}/storage/v1/object/{bucket_name}/{zip_filename}"
+                        
+                        with open(zip_path, 'rb') as f:
+                            headers = {'Content-Type': 'application/zip'}
+                            upload_response = requests.post(upload_url, data=f, headers=headers, timeout=120)
+                        
+                        if upload_response.ok:
+                            download_url = f"{base_url}/storage/v1/object/public/{bucket_name}/{zip_filename}"
+                            yield f'data: {json.dumps({"type": "log", "message": f"✅ Upload Supabase thành công!"})}\n\n'
+                        else:
+                            yield f'data: {json.dumps({"type": "log", "message": "⚠️ Upload Supabase thất bại, dùng download local"})}\n\n'
+                except Exception as e:
+                    yield f'data: {json.dumps({"type": "log", "message": f"⚠️ Không thể upload Supabase: {str(e)}"})}\n\n'
+                
                 yield f'data: {json.dumps({"type": "ok", "message": "🎉 Hoàn thành! Tất cả các chương đã được tách thành công"})}\n\n'
-                yield f'data: {json.dumps({"type": "done", "payload": {"ok": True, "parts": [{"name": n} for n in written], "zip_url": f"/download/{zip_filename}", "total": len(written)}})}\n\n'
+                yield f'data: {json.dumps({"type": "done", "payload": {"ok": True, "parts": [{"name": n} for n in written], "zip_url": download_url, "total": len(written)}})}\n\n'
 
             except Exception as e:
                 import traceback
@@ -351,19 +381,27 @@ def download_file(filename):
     if not file_path.exists():
         return jsonify({'error': 'File không tồn tại'}), 404
     
-    # Kiểm tra file có phải ZIP và không bị corrupt
-    if filename.endswith('.zip'):
-        try:
-            with zipfile.ZipFile(file_path, 'r') as test_zip:
-                test_zip.testzip()  # Test integrity
-        except Exception as e:
-            return jsonify({'error': f'ZIP file bị hỏng: {str(e)}'}), 500
+    # Đọc file và stream từng chunk để tránh timeout
+    def generate_file():
+        with open(file_path, 'rb') as f:
+            chunk_size = 8192  # 8KB chunks
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
     
-    return send_file(
-        file_path,
-        as_attachment=True,
-        download_name=filename,
-        mimetype='application/zip' if filename.endswith('.zip') else 'application/pdf'
+    file_size = file_path.stat().st_size
+    
+    return Response(
+        generate_file(),
+        mimetype='application/zip' if filename.endswith('.zip') else 'application/pdf',
+        headers={
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Content-Length': str(file_size),
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'
+        }
     )
 
 @app.route('/toc-generator')
