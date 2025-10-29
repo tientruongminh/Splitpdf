@@ -610,7 +610,7 @@
     </div>
 
     <div class="download-card" id="downloadCard">
-      <h3>Hoàn thành</h3>
+      <h3>🎉 Hoàn thành</h3>
       <p id="downloadText">PDF đã được tách thành công</p>
       <a href="#" class="download-btn" id="downloadBtn" download>Tải về file ZIP</a>
     </div>
@@ -705,6 +705,7 @@
     const SUPABASE_URL = "https://qgeviaepyuhroqgevzag.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFnZXZpYWVweXVocm9xZ2V2emFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE2NzkyOTgsImV4cCI6MjA3NzI1NTI5OH0.ZDOMu8YIrVlz836v-EBRF74GqTifCUTszTtfQ545ocw";
     const BUCKET = "uploads";
+    const PYTHON_SERVER = 'https://splitpdf-blor.onrender.com';
 
     // Initialize Supabase client
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -750,6 +751,24 @@
       progressStatus.textContent = `${current}/${total}: ${message}`;
     }
 
+    // Handle Server-Sent Events
+    function handleEvent(evt) {
+      if (evt.type === 'log') {
+        log(evt.message);
+      } else if (evt.type === 'progress') {
+        const baseProgress = 60; // 60% reserved for processing
+        const processingPercent = (evt.current / evt.total) * baseProgress;
+        const totalPercent = 40 + processingPercent; // 40% for upload + processing
+        progressFill.style.width = totalPercent + '%';
+        progressFill.textContent = Math.round(totalPercent) + '%';
+        progressStatus.textContent = evt.message;
+      } else if (evt.type === 'ok') {
+        log(evt.message, 'success');
+      } else if (evt.type === 'error') {
+        log(evt.message, 'error');
+      }
+    }
+
     // Supabase Upload Function
     async function uploadToSupabase(file, fileType = 'pdf') {
       const ext = file.name.split('.').pop() || fileType;
@@ -769,74 +788,81 @@
         throw new Error(`Upload ${fileType} thất bại: ${error.message}`);
       }
 
-      // Get public URL
       const { data: publicUrlData } = supabase.storage
         .from(BUCKET)
         .getPublicUrl(key);
 
-      log(`✓ Upload ${fileType} thành công: ${file.name}`);
+      log(`✓ Upload ${fileType} thành công: ${file.name}`, 'success');
       return publicUrlData.publicUrl;
     }
 
-    // Thay thế hàm callSplitApi bằng cái này
-async function callSplitApi(pdfUrl, tocContent, tocType, pageOffset, outdir) {
-  log('Đang gọi API để xử lý PDF...');
-
-  // Gọi đến server Python local (sau này đổi thành Heroku URL)
-  const PYTHON_SERVER = 'https://splitpdf-blor.onrender.com';
-  
-  try {
-    const response = await fetch(`${PYTHON_SERVER}/api/split-supabase`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        source: 'supabase',
-        url: pdfUrl,
-        toc_type: tocType,
-        toc: tocContent,
-        page_offset: parseInt(pageOffset),
-        outdir: outdir
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    // Xử lý Server-Sent Events (streaming response)
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder('utf-8');
-    
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
+    // Call Split API with Server-Sent Events
+    async function callSplitApi(pdfUrl, tocContent, tocType, pageOffset, outdir) {
+      log('Đang gọi API để xử lý PDF...');
       
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split('\n');
+      let finalZipUrl = null;
       
-      for (const line of lines) {
-        if (!line.trim() || !line.startsWith('data:')) continue;
-        
-        const data = line.slice(5).trim();
-        try {
-          const evt = JSON.parse(data);
-          handleEvent(evt);
-        } catch {
-          log(data);
+      try {
+        const response = await fetch(`${PYTHON_SERVER}/api/split-supabase`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            source: 'supabase',
+            url: pdfUrl,
+            toc_type: tocType,
+            toc: tocContent,
+            page_offset: parseInt(pageOffset),
+            outdir: outdir
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          
+          for (const line of lines) {
+            if (!line.trim() || !line.startsWith('data:')) continue;
+            
+            const data = line.slice(5).trim();
+            try {
+              const evt = JSON.parse(data);
+              handleEvent(evt);
+              
+              // Save ZIP URL when received
+              if (evt.type === 'done' && evt.payload && evt.payload.zip_url) {
+                finalZipUrl = evt.payload.zip_url;
+                log(`✓ Nhận được URL download: ${finalZipUrl}`, 'success');
+              }
+            } catch {
+              // Ignore non-JSON lines
+              log(data);
+            }
+          }
+        }
+        
+        if (!finalZipUrl) {
+          throw new Error('Không nhận được URL download từ server');
+        }
+        
+        return finalZipUrl;
+        
+      } catch (error) {
+        console.error('API call failed:', error);
+        throw error;
       }
     }
-    
-    // Trả về blob rỗng vì file download được xử lý qua SSE
-    return new Blob(['Processing complete']);
-    
-  } catch (error) {
-    console.error('API call failed:', error);
-    throw error;
-  }
-}
 
     // Read TOC File
     async function readTocFile(file) {
@@ -876,45 +902,62 @@ async function callSplitApi(pdfUrl, tocContent, tocType, pageOffset, outdir) {
       }
 
       try {
-        // Step 1: Upload PDF to Supabase
+        // Step 1: Upload PDF to Supabase (20%)
         updateProgress(1, 5, 'Đang upload PDF...');
         const pdfUrl = await uploadToSupabase(pdfFile, 'pdf');
+        updateProgress(2, 5, 'Upload PDF hoàn thành');
 
-        // Step 2: Read TOC content
-        updateProgress(2, 5, 'Đang đọc file TOC...');
+        // Step 2: Read TOC content (30%)
+        updateProgress(2.5, 5, 'Đang đọc file TOC...');
         const tocContent = await readTocFile(tocFile);
 
-        // Step 3: Upload TOC to Supabase (optional, for backup)
+        // Step 3: Upload TOC to Supabase (40%)
         updateProgress(3, 5, 'Đang upload TOC...');
         const tocBlob = new Blob([tocContent], { type: 'text/plain' });
         const tocFileObj = new File([tocBlob], 'toc.txt', { type: 'text/plain' });
         await uploadToSupabase(tocFileObj, 'toc');
+        updateProgress(4, 5, 'Upload TOC hoàn thành');
 
-        // Step 4: Call API to process PDF
-        updateProgress(4, 5, 'Đang xử lý PDF...');
-        const zipBlob = await callSplitApi(pdfUrl, tocContent, tocType, pageOffset, outdir);
+        // Step 4: Call API to process PDF (40-100%)
+        log('🚀 Bắt đầu xử lý PDF trên server...', 'success');
+        const zipUrl = await callSplitApi(pdfUrl, tocContent, tocType, pageOffset, outdir);
 
-        // Step 5: Create download link
-        updateProgress(5, 5, 'Đang tạo file download...');
-        const zipUrl = URL.createObjectURL(zipBlob);
+        // Step 5: Setup download link
+        if (!zipUrl) {
+          throw new Error('Không nhận được URL download từ server');
+        }
+
+        // Handle URL: add domain if relative URL
+        const fullZipUrl = zipUrl.startsWith('http') 
+          ? zipUrl 
+          : `${PYTHON_SERVER}${zipUrl}`;
+
+        log(`📦 URL download: ${fullZipUrl}`, 'success');
         
         downloadCard.classList.add('active');
-        downloadBtn.href = zipUrl;
+        downloadBtn.href = fullZipUrl;
         downloadBtn.download = `${outdir}.zip`;
-        downloadText.textContent = `Đã tách thành công - ${pdfFile.name}`;
+        downloadText.textContent = `Đã tách thành công ${pdfFile.name} thành các chapters`;
         
-        log('✓ Xử lý hoàn thành!', 'success');
-        showAlert('PDF đã được tách thành công!');
-
-      } catch (error) {
-        log(`✗ Lỗi: ${error.message}`, 'error');
-        showAlert(`Lỗi: ${error.message}`, 'error');
-        progressCard.classList.remove('active');
-      } finally {
-        btnSubmit.disabled = false;
         progressFill.style.width = '100%';
         progressFill.textContent = '100%';
-        progressStatus.textContent = 'Hoàn thành';
+        progressStatus.textContent = '✓ Hoàn thành!';
+        
+        log('🎉 Xử lý hoàn thành! Click nút bên dưới để tải về.', 'success');
+        showAlert('PDF đã được tách thành công! File ZIP đã sẵn sàng để tải về.');
+
+        // Scroll to download button
+        setTimeout(() => {
+          downloadCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 300);
+
+      } catch (error) {
+        log(`❌ Lỗi: ${error.message}`, 'error');
+        showAlert(`Lỗi: ${error.message}`, 'error');
+        progressCard.classList.remove('active');
+        console.error('Error details:', error);
+      } finally {
+        btnSubmit.disabled = false;
       }
     });
 
@@ -949,7 +992,7 @@ async function callSplitApi(pdfUrl, tocContent, tocType, pageOffset, outdir) {
             document.getElementById('toc').files = dataTransfer.files;
             
             // Show success alert
-            showAlert(`Đã nhận TOC từ Generator! (${data.length} chapters)`);
+            showAlert(`✓ Đã nhận TOC từ Generator! (${data.length} chapters)`);
             
             // Clear localStorage
             localStorage.removeItem('tocFromGenerator');
